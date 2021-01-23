@@ -1,0 +1,1 @@
+export const kHost = "http://localhost:4000"
