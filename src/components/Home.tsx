@@ -1,6 +1,6 @@
 import React, { FC } from "react";
-import { Button, Text, useEventHandler, View } from "@nodegui/react-nodegui";
-import { QPushButtonSignals } from "@nodegui/nodegui";
+import { BoxView, Button, Text, useEventHandler } from "@nodegui/react-nodegui";
+import { Direction, QPushButtonSignals } from "@nodegui/nodegui";
 import { useHistory } from "react-router";
 import { kHost } from "../conf";
 import { useFetch } from "../hooks/useFetch";
@@ -14,10 +14,10 @@ function Home() {
   const [playlists, fetchError] = useFetch<PlaylistShortRes[]>(`${kHost}/`, { initState: [], setter: (newer, prev) => [...prev, ...newer] });
 
   return (
-    <View style={`flex: 2; flex-direction: column;`}>
+    <BoxView direction={Direction.TopToBottom}>
       <Text>{`<center><h2>Playlists</h2></center>`}</Text>
-      {!fetchError && playlists.length !== 0 && playlists.map((playlist, index) => <PlaylistCard key={index} name={playlist.name} playlistId={playlist._id} />)}
-    </View>
+      <BoxView>{!fetchError && playlists.length !== 0 && playlists.map((playlist, index) => <PlaylistCard key={index} name={playlist.name} playlistId={playlist._id} />)}</BoxView>
+    </BoxView>
   );
 }
 
@@ -32,7 +32,7 @@ const PlaylistCard: FC<PlaylistCardProps> = ({ name, playlistId }) => {
   const events = useEventHandler<QPushButtonSignals>(
     {
       clicked: () => {
-        history.push(`/playlist/${playlistId}`, {name});
+        history.push(`/playlist/${playlistId}`, { name });
       },
     },
     []

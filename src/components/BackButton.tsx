@@ -6,7 +6,7 @@ function BackButton(): ReactElement {
   const history = useHistory();
   
   return (
-    <Button style={"align-self: flex-start;"} text="Back" on={{clicked: ()=>history.goBack()}}/>
+    <Button maxSize={{height:30, width: 100}} style={"align-self: flex-start;"} text="Back" on={{clicked: ()=>history.goBack()}}/>
   )
 }
 

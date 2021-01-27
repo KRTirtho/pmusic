@@ -1,67 +1,264 @@
-import React, { ReactElement, useEffect, useState } from "react";
-import { Button, ProgressBar, View } from "@nodegui/react-nodegui";
-import { useFetch } from "../hooks/useFetch";
-import { kHost } from "../conf";
-import { useParams } from "react-router";
-import { HeadersInit } from "node-fetch";
+import {
+  Direction,
+  Orientation,
+  QAbstractSliderSignals,
+} from "@nodegui/nodegui";
+import {
+  BoxView,
+  Button,
+  Slider,
+  Text,
+  useEventHandler,
+} from "@nodegui/react-nodegui";
+import React, { ReactElement, useContext, useEffect, useState } from "react";
+import {
+  AudioPlayerContext,
+  TrackContext,
+} from "../context/audioPlayerContext";
+import { shuffleArray } from "../helpers/shuffleArray";
+import NodeMpv from "node-mpv";
 
-interface PlayerProps {
-  ctrack?: string;
-}
+const audioPlayer = new NodeMpv(
+  {
+    audio_only: true,
+    auto_restart: true,
+    time_update: 1,
+    binary: process.env.MPV_EXECUTABLE ?? "/usr/bin/mpv",
+    debug: true,
+    verbose: true,
+  },
+  ["--ytdl-raw-options-set=format=140,http-chunk-size=300000"]
+);
 
-interface Range {
-  start: number;
-  end: number;
-}
+function Player(): ReactElement {
+  const {
+    currentTrack,
+    totalDuration,
+    tracks,
+    setCurrentTrack,
+    setTracks,
+    setTotalDuration,
+  } = useContext(AudioPlayerContext);
+  const [volume, setVolume] = useState(55);
+  const [trackTime, setTrackTime] = useState(0);
+  const [shuffle, setShuffle] = useState<boolean>(false);
+  const [realPlaylist, setRealPlaylist] = useState<TrackContext["tracks"]>([]);
+  const [isStopped, setIsStopped] = useState<boolean>(false);
+  const playlistTracksUrl = tracks.map((t) => t.url);
+  const trackSliderEvents = useEventHandler<QAbstractSliderSignals>(
+    {
+      sliderMoved: (value) => {
+        if (playerRunning && currentTrack) {
+          const newPosition = (totalDuration * value) / 100;
+          setTrackTime(parseInt(newPosition.toString()));
+        }
+      },
+      sliderReleased: () => {
+        (async () => {
+          try {
+            await audioPlayer.goToPosition(trackTime);
+          } catch (error) {
+            console.error(error);
+          }
+        })();
+      },
+    },
+    [currentTrack, totalDuration, trackTime]
+  );
+  const volumeHandler = useEventHandler<QAbstractSliderSignals>(
+    {
+      sliderMoved: (value) => {
+        setVolume(value);
+      },
+    },
+    []
+  );
+  const playerRunning = audioPlayer.isRunning();
 
-function Player({ ctrack }: PlayerProps): ReactElement {
-  // const trackId = ctrack?.split("=")[1];
-  // const params = useParams<{ id: string }>();
-  // const [progress, setProgress] = useState<number>(0);
-  // const [range, setRange] = useState<Range | null>(null);
-  // const [headers, setHeaders] = useState<HeadersInit>({
-  //   connection: "keep-alive",
-  // });
-  // const [trackStream, error, response] = useFetch<Blob|string>(`${kHost}/playlist/${params.id}/track/${trackId}`, {
-  //   deps: [ctrack, range, headers],
-  //   initState: "",
-  //   reqOpts: { headers },
-  //   stateType: !range ? "json" : "buffer",
-  // });
-  // useEffect(() => {
-  //   const contentLength = response?.headers.get("content-length");
-  //   if (contentLength && !range) {
-  //     const start = 0;
-  //     const end = parseInt(((parseInt(contentLength) * 20) / 100).toString());
-  //     setRange({ start, end });
-  //     setHeaders({ ...headers, range: `bytes=${start}-${end}` });
-  //   }
-  //   const contentRange = response?.headers
-  //     .get("content-range")
-  //     ?.split(/bytes ([0-9]*)-([0-9]*)\/([0-9]*)/)
-  //     .filter(Boolean);
-  //   if (contentRange && range) {
-  //     const contentEndPoint = parseInt(contentRange[1]);
-  //     const totalLength = parseInt(contentRange[2]);
-  //     const tenOfTotal = parseInt(((totalLength * 10) / 100).toString()); //10%
-  //     const start = contentEndPoint + 1;
-  //     const remainingContent = totalLength - contentEndPoint;
-  //     const newerProgress = progress + tenOfTotal;
-  //     const endLength = newerProgress + contentEndPoint;
-  //     const end = remainingContent < newerProgress ? totalLength - 1 : endLength;
-  //     setProgress(newerProgress);
-  //     setRange({ start, end });
-  //     setHeaders({ ...headers, range: `bytes=${start}-${end}` });
-  //   }
-  //   else if (error && error.code === 'HPE_INVALID_CONTENT_LENGTH') {
-      
-  //   }
-  // }, [response]);
+  // initial Effect
+  useEffect(() => {
+    (async () => {
+      try {
+        if (!playerRunning) {
+          await audioPlayer.start();
+        }
+        await audioPlayer.clearPlaylist();
+        await audioPlayer.volume(55);
+      } catch (error) {
+        console.error("Failed to start audio player");
+        console.error(error);
+      }
+    })();
+
+    return () => {
+      if (playerRunning) {
+        audioPlayer.quit().catch((e: any) => console.log(e));
+      }
+    };
+  }, []);
+
+  // track change effect
+  useEffect(() => {
+    (async () => {
+      try {
+        if (currentTrack && playerRunning) {
+          await audioPlayer.load(currentTrack, "replace");
+          setTrackTime(0);
+          await audioPlayer.play();
+        }
+        setIsStopped(false);
+      } catch (error) {
+        if (error.errcode !== 5) {
+          setIsStopped(true);
+        }
+        console.error(error);
+      }
+    })();
+  }, [currentTrack]);
+
+  useEffect(() => {
+    if (playerRunning) {
+      audioPlayer.volume(volume);
+    }
+  }, [volume]);
+
+  // for monitoring shuffle playlist
+  useEffect(() => {
+    if (shuffle && realPlaylist.length === 0) {
+      const shuffledTracks = shuffleArray(tracks);
+      setRealPlaylist(tracks);
+      setTracks(shuffledTracks);
+    } else if (!shuffle && realPlaylist.length > 0) {
+      setTracks(realPlaylist);
+    }
+  }, [shuffle]);
+
+  // live Effect
+  useEffect(() => {
+    if (playerRunning) {
+      const statusListener = (status: { property: string; value: any }) => {
+        if (status?.property === "duration") {
+          setTotalDuration(status.value);
+        }
+      };
+      const stopListener = () => {
+        setIsStopped(true);
+        // go to next track
+        if (currentTrack && playlistTracksUrl && tracks.length !== 0) {
+          const index = playlistTracksUrl?.indexOf(currentTrack) + 1;
+          setCurrentTrack(
+            playlistTracksUrl[index > playlistTracksUrl.length - 1 ? 0 : index]
+          );
+        }
+      };
+      const progressListener = (seconds: number) => {
+        console.log("seconds", seconds);
+        setTrackTime(seconds);
+      };
+      audioPlayer.on("status", statusListener);
+      audioPlayer.on("stopped", stopListener);
+      audioPlayer.on("timeposition", progressListener);
+      return () => {
+        audioPlayer.off("timeposition", progressListener);
+        audioPlayer.off("status", statusListener);
+        audioPlayer.off("stopped", stopListener);
+      };
+    }
+  });
+
+  const handlePlayPause = async () => {
+    try {
+      if ((await audioPlayer.isPaused()) && playerRunning) {
+        await audioPlayer.play();
+        setIsStopped(false);
+      } else {
+        await audioPlayer.pause();
+        setIsStopped(true);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const prevOrNext = (constant: number) => {
+    if (currentTrack && playlistTracksUrl) {
+      const index = playlistTracksUrl.indexOf(currentTrack) + constant;
+      setCurrentTrack(
+        playlistTracksUrl[
+          index > playlistTracksUrl?.length - 1
+            ? 0
+            : index < 0
+            ? playlistTracksUrl.length - 1
+            : index
+        ]
+      );
+    }
+  };
+
+  const trackName = tracks.find((track) => track.url === currentTrack);
+  const playbackPercentage =
+    totalDuration > 0 ? (trackTime * 100) / totalDuration : 0;
   return (
-    
+    <BoxView style={`max-height: 120px;`} direction={Direction.TopToBottom}>
+      <BoxView direction={Direction.LeftToRight} style={`padding: 20px 0px`}>
+        <Slider
+          enabled={!!currentTrack || trackTime > 0}
+          on={trackSliderEvents}
+          sliderPosition={playbackPercentage}
+          hasTracking
+          orientation={Orientation.Horizontal}
+        />
+        <Text>
+          {new Date(trackTime * 1000).toISOString().substr(14, 5) +
+            "/" +
+            new Date(totalDuration * 1000).toISOString().substr(14, 5)}
+        </Text>
+      </BoxView>
+
+      <BoxView>
+        <Text>
+          {currentTrack &&
+            `
+            <p>
+            <h4>${trackName?.name}</h4>
+            ${trackName?.artists}
+            </p>
+            `}
+        </Text>
+
+        <Button
+          style={`background-color: ${shuffle ? "orange" : "native"}`}
+          on={{ clicked: () => setShuffle(!shuffle) }}
+          maxSize={{ height: 30, width: 100 }}
+          text="🔀"
+        />
+        <Button
+          maxSize={{ height: 30, width: 100 }}
+          on={{ clicked: () => prevOrNext(-1) }}
+          text="⏪"
+        />
+        <Button
+          maxSize={{ height: 30, width: 100 }}
+          on={{ clicked: handlePlayPause }}
+          text={isStopped ? "▶" : "⏸"}
+        />
+        <Button
+          maxSize={{ height: 30, width: 100 }}
+          on={{ clicked: () => prevOrNext(1) }}
+          text="⏩"
+        />
+        <Button maxSize={{ height: 30, width: 100 }} text="➿" />
+        <Slider
+          minSize={{ height: 20, width: 80 }}
+          maxSize={{ height: 20, width: 100 }}
+          hasTracking
+          sliderPosition={volume}
+          on={volumeHandler}
+          orientation={Orientation.Horizontal}
+        />
+      </BoxView>
+    </BoxView>
   );
 }
 
 export default Player;
-
-
